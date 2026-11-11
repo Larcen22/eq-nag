@@ -625,12 +625,15 @@ ipcMain.on( 'app:log:info', ( event, data ) => {
     log.info( data );
 } );
 
-if ( process.platform === 'linux' ) {
+// Piper TTS backend is used on Linux and Windows when configured;
+// Windows falls back to native speechSynthesis when Piper is not set up.
+if ( process.platform === 'linux' || process.platform === 'win32' ) {
     ipcMain.on( 'tts:piper:speak', ( event, data ) => {
         PiperTts.configure( userPreferences.piperDirectory, userPreferences.piperModel );
         PiperTts.speak( data.text, data.interrupt, data.speakNext, data.volume, data.rate, event.sender );
     } );
     ipcMain.on( 'tts:piper:cancel', () => PiperTts.cancel() );
+    ipcMain.handle( 'tts:piper:available', () => PiperTts.isConfigured( userPreferences.piperDirectory, userPreferences.piperModel ) );
 }
 
 var quitCalled = false;

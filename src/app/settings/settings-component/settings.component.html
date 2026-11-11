@@ -222,7 +222,7 @@
             </div>
             <div>
                 <h2 class="sub-header full-width">Text to Speech</h2>
-                <mat-form-field style="width: 100%;" *ngIf="!isLinux">
+                <mat-form-field style="width: 100%;" *ngIf="!isLinux && !piperModel">
                     <mat-label></mat-label>
                     <mat-select [(ngModel)]="voiceIndex" (selectionChange)="onChangeVoice()">
                         <mat-option *ngFor="let option of voiceOptions; let i = index" [value]="i">{{option.name}}</mat-option>
@@ -231,7 +231,7 @@
                 </mat-form-field>
                 <div style="margin-top: 15px;">Base Speaking Rate</div>
                 <mat-slider [(ngModel)]="baseSpeakingRate" thumbLabel tickInterval="0.25" step="0.25" min="0.25" max="4" style="width: 100%;" (change)="updateSetting( settingsKeys.baseSpeakingRate, baseSpeakingRate, 500 )"></mat-slider>
-                <div *ngIf="isLinux" class="piper-block">
+                <div *ngIf="isLinux || isWindows" class="piper-block">
                     <h3 class="sub-header full-width">Piper (Local TTS)</h3>
                     <mat-form-field style="width: 100%;">
                         <mat-label>Piper folder</mat-label>

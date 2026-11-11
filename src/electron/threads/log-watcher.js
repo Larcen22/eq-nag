@@ -78,6 +78,7 @@ var masterVolume = 100;
 var speechVolume = 100;
 var audioVolume = 100;
 var baseSpeakingRate = 1;
+var piperModel = '';
 const logParseTimer = 50;
 var changingLogFile = false;
 var backupStarted = false;
@@ -687,6 +688,7 @@ function LogWatcher(character, logPosition) {
         speechVolume = data.speechVolume;
         audioVolume = data.audioVolume;
         baseSpeakingRate = data.baseSpeakingRate;
+        piperModel = data.piperModel ?? '';
         isDev = data.isDev;
         phoneticTransforms = data.phoneticTransforms;
         charModel = data.characterModel ? data.characterModel : charModel;
@@ -2833,7 +2835,7 @@ function clearAll() {
 
     utterances = [];
     speechSynthesis.cancel();
-    if ( process.platform === 'linux' ) {
+    if ( process.platform === 'linux' || piperModel ) {
         ipcRenderer.send( 'tts:piper:cancel' );
     }
 
@@ -4002,8 +4004,9 @@ function speakPhrase( phrase, interrupt, speakNext, conditionResults, simulating
         text = StringUtilities.parseCountersToLiteral( text, counters );
         text = StringUtilities.parsePhoneticTransformsToLiteral( text, phoneticTransforms );
 
-        if ( process.platform === 'linux' ) {
-            // Linux: Chromium speechSynthesis has no voices, so speak via Piper.
+        if ( process.platform === 'linux' || piperModel ) {
+            // Linux has no Chromium voices; Windows uses Piper when a model is configured,
+            // otherwise falls through to native speechSynthesis.
             ipcRenderer.send( 'tts:piper:speak', {
                 text,
                 interrupt,

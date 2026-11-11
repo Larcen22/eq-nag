@@ -4,10 +4,14 @@ const os = require( 'os' );
 const path = require( 'path' );
 
 /**
- * Linux text-to-speech backend using the Piper neural TTS engine.
- * Synthesizes phrases to WAV files via the piper CLI and plays them
- * through paplay, mirroring the speechSynthesis queue semantics
- * (interrupt / speakNext / queued) used on Windows.
+ * Text-to-speech backend using the Piper neural TTS engine.
+ * Synthesizes phrases to WAV files via the piper CLI and plays them,
+ * mirroring the speechSynthesis queue semantics (interrupt / speakNext /
+ * queued) used on Windows.
+ *
+ * Playback is platform-specific: Linux uses paplay; Windows plays the
+ * generated WAV with PowerShell's System.Media.SoundPlayer (no new deps).
+ * The Piper binary is `piper` on Linux and `piper.exe` on Windows.
  */
 
 const piperDirEnv = process.env.EQNAG_PIPER_DIR ?? '';
@@ -15,6 +19,8 @@ const piperModelEnv = process.env.EQNAG_PIPER_MODEL ?? '';
 let piperDirectory = piperDirEnv;
 let piperModelFile = piperModelEnv;
 const sampleRate = 22050;
+const isWindows = process.platform === 'win32';
+const piperBinaryName = isWindows ? 'piper.exe' : 'piper';
 
 /**
  * Sets the Piper installation folder and voice model from user preferences.
@@ -32,6 +38,19 @@ function configure( directory, modelFile ) {
 }
 
 /**
+ * Returns true when Piper is usable (binary + model resolvable in the
+ * configured directory). Lets callers fall back to speechSynthesis when
+ * Piper is not set up.
+ * 
+ * @param {string} directory The Piper folder from user preferences.
+ * @param {string} modelFile The selected voice model file name.
+ */
+function isConfigured( directory, modelFile ) {
+    configure( directory, modelFile );
+    return resolvePaths() != null;
+}
+
+/**
  * Resolves the piper binary, library directory, and model file for the
  * configured directory. Returns null when Piper is not configured properly.
  */
@@ -41,7 +60,10 @@ function resolvePaths() {
         return null;
     }
 
-    const binCandidates = [ path.join( piperDirectory, 'piper' ), path.join( piperDirectory, 'piper', 'piper' ) ];
+    const binCandidates = [
+        path.join( piperDirectory, piperBinaryName ),
+        path.join( piperDirectory, 'piper', piperBinaryName ),
+    ];
     const bin = binCandidates.find( p => {
         try {
             return fs.statSync( p ).isFile();
@@ -136,7 +158,8 @@ function synthesizeAndPlay( item ) {
         '--length_scale', String( item.lengthScale ),
         '--quiet',
     ], {
-        env: { ...process.env, LD_LIBRARY_PATH: paths.lib },
+        // Linux Piper ships shared libs next to the binary; Windows needs no LD_LIBRARY_PATH.
+        env: isWindows ? process.env : { ...process.env, LD_LIBRARY_PATH: paths.lib },
         stdio: [ 'pipe', 'pipe', 'pipe' ],
     } );
 
@@ -166,12 +189,19 @@ function synthesizeAndPlay( item ) {
         const wavPath = path.join( os.tmpdir(), `eqnag-tts-${process.pid}-${wavCounter++}.wav` );
         fs.writeFileSync( wavPath, buildWav( Buffer.concat( chunks ), item.volume ) );
 
-        const player = spawn( 'paplay', [ wavPath ], { stdio: [ 'ignore', 'ignore', 'pipe' ] } );
+        // Linux: paplay. Windows: PowerShell SoundPlayer, which plays the WAV
+        // synchronously and exits when playback finishes.
+        const player = isWindows
+            ? spawn( 'powershell.exe', [
+                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+                `(New-Object System.Media.SoundPlayer "${wavPath}").PlaySync()`,
+            ], { stdio: [ 'ignore', 'ignore', 'pipe' ] } )
+            : spawn( 'paplay', [ wavPath ], { stdio: [ 'ignore', 'ignore', 'pipe' ] } );
         currentPlayer = player;
-        player.stderr.on( 'data', chunk => console.error( '[PiperTts] paplay stderr:', chunk.toString().trim() ) );
+        player.stderr.on( 'data', chunk => console.error( `[PiperTts] player stderr: ${chunk.toString().trim()}` ) );
 
         player.on( 'error', err => {
-            console.error( `[PiperTts] Failed to start paplay: ${err.message}` );
+            console.error( `[PiperTts] Failed to start player: ${err.message}` );
             fs.unlinkSync( wavPath );
             currentPlayer = null;
             next();
@@ -256,4 +286,4 @@ function cancel() {
     queue = [];
 }
 
-module.exports = { speak, cancel, configure };
+module.exports = { speak, cancel, configure, isConfigured };

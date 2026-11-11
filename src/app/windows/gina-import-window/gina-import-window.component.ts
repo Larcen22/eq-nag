@@ -83,6 +83,7 @@ export class GinaImportWindowComponent implements OnInit {
 
     public voiceOptions: SpeechSynthesisVoice[] = [];
     public voiceIndex: number;
+    public piperAvailable: boolean = false;
     public ginaTimerTypes: typeof GinaTimerTypes = GinaTimerTypes;
     
     public actionTypes: typeof ActionTypes = ActionTypes;
@@ -163,6 +164,7 @@ export class GinaImportWindowComponent implements OnInit {
             // this.dkpEntries = data.dkpEntries;
             // this.logFile = data.logFile;
             this.voiceIndex = data.voiceIndex;
+            this.piperAvailable = !navigator.platform.toLowerCase().includes( 'linux' ) && !!data.piperModel;
             this.ignoredGinaObjects = data.ignoredGinaObjects?.length > 0 ? data.ignoredGinaObjects : [];
             this.overlays = data.overlays;
             
@@ -323,7 +325,7 @@ export class GinaImportWindowComponent implements OnInit {
     }
 
     public speakPhrase( phrase: string ): void {
-        if ( navigator.platform.toLowerCase().includes( 'linux' ) ) {
+        if ( navigator.platform.toLowerCase().includes( 'linux' ) || this.piperAvailable ) {
             window.api.ipc.send( 'tts:piper:speak', { text: phrase, interrupt: true, speakNext: false, volume: 1, rate: 1 } );
             return;
         }

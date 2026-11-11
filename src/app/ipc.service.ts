@@ -2252,6 +2252,22 @@ export class IpcService {
         return obs;
     }
 
+    public getPiperAvailable(): Observable<boolean> {
+        let obs: Observable<boolean> = new Observable<boolean>( ( observer: Observer<boolean> ) => {
+
+            window.api.ipc.invoke<boolean>( 'tts:piper:available' )
+                .then( available => {
+                    this.ngZone.run( () => {
+                        observer.next( available );
+                        observer.complete();
+                    } );
+                } );
+
+        } );
+
+        return obs;
+    }
+
     public selectPiperFolder(): Observable<string> {
         let obs: Observable<string> = new Observable<string>( ( observer: Observer<string> ) => {
 

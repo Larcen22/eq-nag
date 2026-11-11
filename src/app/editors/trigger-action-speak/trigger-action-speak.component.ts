@@ -13,6 +13,7 @@ export class TriggerActionSpeakComponent implements OnInit {
 
     private voiceOptions: SpeechSynthesisVoice[] = [];
     private voiceIndex: number = null;
+    private piperAvailable: boolean = false;
 
     constructor(
         private readonly ipcService: IpcService,
@@ -25,6 +26,9 @@ export class TriggerActionSpeakComponent implements OnInit {
 
     ngOnInit() {
         this.ipcService.getSetting<number>( SettingsKeys.voiceIndex ).subscribe( index => this.voiceIndex = index );
+        if ( !navigator.platform.toLowerCase().includes( 'linux' ) ) {
+            this.ipcService.getPiperAvailable().subscribe( available => this.piperAvailable = available );
+        }
     }
 
     /**
@@ -33,7 +37,7 @@ export class TriggerActionSpeakComponent implements OnInit {
      * @param phrase The phrase to speak.
      */
     speakPhrase( phrase: string, rate: number ): void {
-        if ( navigator.platform.toLowerCase().includes( 'linux' ) ) {
+        if ( navigator.platform.toLowerCase().includes( 'linux' ) || this.piperAvailable ) {
             window.api.ipc.send( 'tts:piper:speak', { text: phrase.replace( /\$/gi, '' ).replace( /\{/gi, '' ).replace( /\}/gi, '' ), interrupt: true, speakNext: false, volume: 1, rate: rate ?? 1 } );
             return;
         }

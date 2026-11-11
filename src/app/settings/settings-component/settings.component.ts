@@ -65,6 +65,7 @@ export class SettingsComponent implements OnInit {
     public utter: SpeechSynthesisUtterance | undefined = undefined;
     public updatedSettings: string[] = [];
     public isLinux: boolean = navigator.platform.toLowerCase().includes('linux');
+    public isWindows: boolean = navigator.platform.toLowerCase().includes('win');
     public piperDirectory: string = '';
     public piperModel: string = '';
     public piperModels: string[] = [];
@@ -613,7 +614,7 @@ export class SettingsComponent implements OnInit {
             this.utter = undefined;
         }
 
-        if ( navigator.platform.toLowerCase().includes( 'linux' ) ) {
+        if ( this.isLinux || this.piperModel ) {
             window.api.ipc.send( 'tts:piper:speak', { text: phrase, interrupt: true, speakNext: false, volume: ( this.speechVolume / 100 ) * ( this.masterVolume / 100 ), rate: MathUtilities.clamp( rate, 0.5, 2 ) } );
             return;
         }
