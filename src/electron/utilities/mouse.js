@@ -1,4 +1,5 @@
 const { getCurrentWindow, screen } = require( '@electron/remote' );
+const { ipcRenderer } = require( 'electron' );
 const { mouseZIndex } = require( './constants' );
 
 var mouseEnabled = false;
