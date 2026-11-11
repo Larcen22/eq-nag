@@ -138,7 +138,7 @@
             </div>
             <div>
                 <h2 class="sub-header full-width">Text to Speech</h2>
-                <mat-form-field style="width: 100%;">
+                <mat-form-field style="width: 100%;" *ngIf="!isLinux">
                     <mat-label></mat-label>
                     <mat-select [(ngModel)]="voiceIndex" (selectionChange)="onChangeVoice()">
                         <mat-option *ngFor="let option of voiceOptions; let i = index" [value]="i">{{option.name}}</mat-option>
@@ -147,6 +147,22 @@
                 </mat-form-field>
                 <div style="margin-top: 15px;">Base Speaking Rate</div>
                 <mat-slider [(ngModel)]="baseSpeakingRate" thumbLabel tickInterval="0.25" step="0.25" min="0.25" max="4" style="width: 100%;" (change)="updateSetting( settingsKeys.baseSpeakingRate, baseSpeakingRate, 500 )"></mat-slider>
+                <div *ngIf="isLinux" class="piper-block">
+                    <h3 class="sub-header full-width">Piper (Local TTS)</h3>
+                    <mat-form-field style="width: 100%;">
+                        <mat-label>Piper folder</mat-label>
+                        <input matInput type="text" [(ngModel)]="piperDirectory" name="txtPiperDirectory" (blur)="onChangePiperFolder()" (change)="onChangePiperFolder()" />
+                        <mat-hint>Folder containing the piper binary and .onnx voice models</mat-hint>
+                        <button mat-icon-button matSuffix type="button" aria-label="Browse Piper folder" (click)="browsePiperFolder()"><mat-icon>folder_open</mat-icon></button>
+                    </mat-form-field>
+<div class="form-field full-width" style="display:flex;flex-direction:column;gap:4px;width:100%;">
+                    <label class="field-label">Voice</label>
+                    <select style="width:100%;" [ngModel]="piperModel" (ngModelChange)="onChangePiperModel($event)">
+                        <option *ngFor="let model of piperModels" [value]="model">{{model}}</option>
+                    </select>
+                    <span class="field-hint">{{ piperModels.length }} model(s) found in {{ piperDirectory }}</span>
+                </div>
+                </div>
                 <div>
                     <h3 class="sub-header full-width">Examples</h3>
                     <div>

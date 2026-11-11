@@ -10,6 +10,23 @@ const { IpcMessage } = require( "./data/models/common" );
 const { LogFileLocation } = require( "./data/log-file-location" );
 const path = require( "path" );
 const ElectronUtilities = require( "./utilities/electron" );
+
+/**
+ * Positions a window centered on the primary display, using the display's
+ * absolute bounds (origin included) rather than origin-relative work area.
+ * Without the origin, multi-monitor setups (e.g. primary at x=1920) would
+ * land the window on a different monitor.
+ * 
+ * @param {BrowserWindow} bwin The window to center.
+ */
+function centerWindowOnPrimaryDisplay( bwin ) {
+    const d = screen.getPrimaryDisplay().bounds;
+    const [ w, h ] = bwin.getSize();
+    bwin.setPosition(
+        Math.floor( d.x + ( d.width - w ) / 2 ),
+        Math.floor( d.y + ( d.height - h ) / 2 ),
+    );
+}
 const CharacterDatabaseStore = require( "./data/character-database" );
 const { RenderTokenModel } = require( "./data/models/renderer" );
 
@@ -276,6 +293,7 @@ class WindowManager {
             }
             triggerWindow.loadURL( url );
             triggerWindow.once( "ready-to-show", () => {
+                centerWindowOnPrimaryDisplay( triggerWindow );
                 triggerWindow.show();
             } );
             triggerWindow.setBackgroundColor( '#1a1a1a' );
@@ -303,6 +321,7 @@ class WindowManager {
 
             triggerWindow.loadURL( `file://${this.#dirname}/dist/index.html#/trigger/${arg}` );
             triggerWindow.once( "ready-to-show", () => {
+                centerWindowOnPrimaryDisplay( triggerWindow );
                 triggerWindow.show();
             } );
             triggerWindow.setBackgroundColor( '#1a1a1a' );
@@ -314,10 +333,10 @@ class WindowManager {
 
             if ( size?.width && size?.height ) {
                 bwin.setSize( size.width, size.height );
-                bwin.setPosition( ( screen.getPrimaryDisplay().workAreaSize.width / 2 ) - ( size.width / 2 ), ( screen.getPrimaryDisplay().workAreaSize.height / 2 ) - ( size.height / 2 ) );
+                centerWindowOnPrimaryDisplay( bwin );
             } else {
                 bwin.setSize( 732, 870 );
-                bwin.setPosition( ( screen.getPrimaryDisplay().workAreaSize.width / 2 ) - ( 732 / 2 ), ( screen.getPrimaryDisplay().workAreaSize.height / 2 ) - ( 870 / 2 ) );
+                centerWindowOnPrimaryDisplay( bwin );
             }
 
         } );
@@ -417,6 +436,9 @@ class WindowManager {
                 
             } );
             overlayEditorDialog.once( "ready-to-show", () => {
+                if ( posData == null ) {
+                    centerWindowOnPrimaryDisplay( overlayEditorDialog );
+                }
                 overlayEditorDialog.show();
                 this.#openOverlayEditors.push( overlayEditorDialog );
             } );
@@ -594,6 +616,7 @@ class WindowManager {
             }
             this.ginaImportWindow.loadURL( url );
             this.ginaImportWindow.once( "ready-to-show", () => {
+                centerWindowOnPrimaryDisplay( this.ginaImportWindow );
                 this.ginaImportWindow.show();
                 event.sender.send( 'gina:dialog:import', true );
             } );
@@ -638,6 +661,7 @@ class WindowManager {
             }
             this.triggerLibraryWindow.loadURL( url );
             this.triggerLibraryWindow.once( "ready-to-show", () => {
+                centerWindowOnPrimaryDisplay( this.triggerLibraryWindow );
                 this.triggerLibraryWindow.show();
                 event.sender.send( 'trigger:dialog:library', true );
             } );
@@ -677,6 +701,7 @@ class WindowManager {
             }
             this.logSimulatorWindow.loadURL( url );
             this.logSimulatorWindow.once( "ready-to-show", () => {
+                centerWindowOnPrimaryDisplay( this.logSimulatorWindow );
                 this.logSimulatorWindow.show();
                 event.sender.send( 'trigger:dialog:log-simulator', true );
             } );
@@ -722,6 +747,7 @@ class WindowManager {
             }
             this.easyWindow.loadURL( url );
             this.easyWindow.once( "ready-to-show", () => {
+                centerWindowOnPrimaryDisplay( this.easyWindow );
                 this.easyWindow.show();
                 event.sender.send( 'trigger:dialog:easy-window', true );
             } );
@@ -811,6 +837,7 @@ class WindowManager {
         }
         this.updateNotesWindow.loadURL( url );
         this.updateNotesWindow.once( "ready-to-show", () => {
+            centerWindowOnPrimaryDisplay( this.updateNotesWindow );
             this.updateNotesWindow.show();
             event && event.sender.send( 'window:update-notes:show', true );
         } );
@@ -1064,6 +1091,7 @@ class WindowManager {
 
         settingsWindow.loadURL( url );
         settingsWindow.once( "ready-to-show", () => {
+            centerWindowOnPrimaryDisplay( settingsWindow );
             settingsWindow.show();
         } );
         settingsWindow.on( 'closed', () => {

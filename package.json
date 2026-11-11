@@ -27,6 +27,8 @@
     "build:local": "npm run set-localhost-env && npm run copy-source-maps && electron-builder build --win --publish never",
     "perf": "node tools/perf/perf-test.mjs",
     "build": "npm run set-production-env && npm run copy-source-maps && electron-builder build --win --publish never",
+    "build:linux": "npm run set-localhost-env && electron-builder build --linux --publish never",
+    "build:linux:production": "npm run set-production-env && electron-builder build --linux --publish never",
     "deploy": "npm run set-production-env && npm run copy-source-maps && electron-builder build --win --publish always"
   },
   "private": true,
@@ -120,6 +122,15 @@
         }
       ],
       "icon": "Nag.ico"
+    },
+    "linux": {
+      "maintainer": "Guild Antix",
+      "synopsis": "Triggers events for EverQuest.",
+      "target": [
+        "AppImage",
+        "deb"
+      ],
+      "icon": "Nag-512.png"
     },
     "portable": {
       "artifactName": "eq_nag_portable.exe"

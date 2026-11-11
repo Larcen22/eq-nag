@@ -1609,6 +1609,9 @@ function Renderer( originX, originY, glowOnStart ) {
     ipcRenderer.on( 'renderer:window:enable-edit', function ( event, overlayId ) {
         moveToTop( overlayInstances[ overlayId ].dom );
         enableMoveResize( overlayInstances[ overlayId ].dom );
+        if ( process.platform === 'linux' ) {
+            MouseUtilities.setHandleMouseEvents( true );
+        }
         MouseUtilities.refreshDom();
     } );
 
@@ -1635,6 +1638,9 @@ function Renderer( originX, originY, glowOnStart ) {
         if ( overlayInstances[ overlayId ] ) {
             disableMoveResize( overlayInstances[ overlayId ].dom );
         }
+        if ( process.platform === 'linux' ) {
+            MouseUtilities.setIgnoreMouseEvents();
+        }
         MouseUtilities.refreshDom();
     } );
 
@@ -1642,6 +1648,10 @@ function Renderer( originX, originY, glowOnStart ) {
         eachOverlay( function ( overlay ) {
             enableMoveResize( overlay.dom );
         } );
+        // Linux: cursor-poll click-through is unreliable, so capture mouse for the whole window during arrange.
+        if ( process.platform === 'linux' ) {
+            MouseUtilities.setHandleMouseEvents( true );
+        }
         MouseUtilities.refreshDom();
     } );
 
@@ -1649,6 +1659,9 @@ function Renderer( originX, originY, glowOnStart ) {
         eachOverlay( function ( overlay ) {
             disableMoveResize( overlay.dom );
         } );
+        if ( process.platform === 'linux' ) {
+            MouseUtilities.setIgnoreMouseEvents();
+        }
         MouseUtilities.refreshDom();
     } );
 
@@ -5297,7 +5310,6 @@ function renderGlow( color, duration, flash ) {
     duration = flash && duration % 2000 > 0 ? duration + ( 2000 - duration % 2000 ) : duration;
 
     if ( !screenGlower ) {
-        let bounds = screen.getPrimaryDisplay().bounds;
         let content = createElement( 'div' );
 
         // box-shadow: inset 0 0 30px #00f;
@@ -5310,10 +5322,10 @@ function renderGlow( color, duration, flash ) {
         // 
         content.style.boxShadow = `inset 0 0 133px ${color}`;
         content.style.position = 'absolute';
-        content.style.left = `${origin.x}px`;
-        content.style.top = `${origin.y}px`;
-        content.style.width = `${bounds.width}px`;
-        content.style.height = `${bounds.height}px`;
+        content.style.left = '0px';
+        content.style.top = '0px';
+        content.style.width = `${window.innerWidth}px`;
+        content.style.height = `${window.innerHeight}px`;
         
         document.body.appendChild( content );
         screenGlower = content;

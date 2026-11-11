@@ -264,6 +264,22 @@ class UserPreferencesStore extends Store {
         this.storeDataFile( this.#data );
     }
 
+    get piperDirectory() {
+        return this.#data?.piperDirectory ?? '';
+    }
+    set piperDirectory( val ) {
+        this.#data.piperDirectory = val ?? '';
+        this.storeDataFile( this.#data );
+    }
+
+    get piperModel() {
+        return this.#data?.piperModel ?? '';
+    }
+    set piperModel( val ) {
+        this.#data.piperModel = val ?? '';
+        this.storeDataFile( this.#data );
+    }
+
     get audioVolume() {
         if ( this.#data && this.#data.audioVolume > -1 ) {
             return this.#data.audioVolume;
@@ -732,6 +748,24 @@ class UserPreferencesStore extends Store {
         ipcMain.on( 'voice:select', ( event, arg ) => {
             this.voiceIndex = arg;
             sendTick();
+        } );
+
+        ipcMain.handle( 'tts:piper:select-folder', async ( event ) => {
+            const result = await dialog.showOpenDialog( BrowserWindow.fromWebContents( event.sender ), { properties: [ 'openDirectory' ] } );
+            return result.cancelled ? null : result.filePaths[ 0 ];
+        } );
+
+        ipcMain.handle( 'tts:piper:list-models', () => {
+            let dir = this.piperDirectory;
+            if ( !dir ) {
+                return [];
+            }
+            try {
+                const models = fs.readdirSync( dir ).filter( f => f.endsWith( '.onnx' ) ).sort();
+                return models;
+            } catch {
+                return [];
+            }
         } );
 
         ipcMain.on( 'settings:set',

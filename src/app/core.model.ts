@@ -47,6 +47,8 @@ export enum SettingsKeys {
     dpsMeterSettings = 'dpsMeterSettings',
     serverTrustedPlayers = 'serverTrustedPlayers',
     serverBlockedPlayers = 'serverBlockedPlayers',
+    piperDirectory = 'piperDirectory',
+    piperModel = 'piperModel',
 };
 
 export enum ActionTypes {
@@ -676,6 +678,8 @@ export class DataTickModel {
     public quickShareAuthorsListType: QuickShareAuthorListTypes;
     public quickShareAuthorsList: string[] = [];
     public baseSpeakingRate: number = 1;
+    public piperDirectory: string = '';
+    public piperModel: string = '';
     public characterDisabledTriggers: {
         characterId: any;
         disabledTriggers: string[];

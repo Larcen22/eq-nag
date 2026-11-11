@@ -2782,6 +2782,9 @@ function clearAll() {
 
     utterances = [];
     speechSynthesis.cancel();
+    if ( process.platform === 'linux' ) {
+        ipcRenderer.send( 'tts:piper:cancel' );
+    }
 
     changingLogFile = true;
     window.setTimeout( () => {
@@ -3935,23 +3938,41 @@ function renderPhrases( phrases, conditionResults, parseResult, deltaTime, parse
  */
 function speakPhrase( phrase, interrupt, speakNext, conditionResults, simulating, parseResult, timerDuration, deltaTime, volume, rate, afterSpeech ) {
     
-    if ( !simulating && phrase && voiceIndex > -1 ) {
+    if ( !simulating && phrase ) {
 
-        let utter = new SpeechSynthesisUtterance();
-    
-        utter.text = StringUtilities.parseShortCodeValuesToLiteral( phrase, characterName, timerDuration, parseResult?.groups, parseResult ? parseResult[ 0 ] : null );
-        utter.text = StringUtilities.parseStoredVariablesToLiteral( utter.text, storedVariables );
+        let text = StringUtilities.parseShortCodeValuesToLiteral( phrase, characterName, timerDuration, parseResult?.groups, parseResult ? parseResult[ 0 ] : null );
+        text = StringUtilities.parseStoredVariablesToLiteral( text, storedVariables );
         if ( conditionResults ) {
-            utter.text = StringUtilities.parseConditionResultsToLiteral( utter.text, conditionResults );
+            text = StringUtilities.parseConditionResultsToLiteral( text, conditionResults );
         }
         if ( parseResult ) {
-            utter.text = StringUtilities.parseMatchesToLiteral( utter.text, parseResult, deltaTime );
+            text = StringUtilities.parseMatchesToLiteral( text, parseResult, deltaTime );
         }
-        utter.text = StringUtilities.parseCountersToLiteral( utter.text, counters );
-        utter.text = StringUtilities.parsePhoneticTransformsToLiteral( utter.text, phoneticTransforms );
-        utter.voice = voiceOptions[ voiceIndex ];
-        utter.volume = ( masterVolume / 100 ) * ( speechVolume / 100 ) * ( volume > 0 ? volume / 100 : 1 );
-        utter.rate = ( rate ?? 1 ) * ( baseSpeakingRate ?? 1 );
+        text = StringUtilities.parseCountersToLiteral( text, counters );
+        text = StringUtilities.parsePhoneticTransformsToLiteral( text, phoneticTransforms );
+
+        if ( process.platform === 'linux' ) {
+            // Linux: Chromium speechSynthesis has no voices, so speak via Piper.
+            ipcRenderer.send( 'tts:piper:speak', {
+                text,
+                interrupt,
+                speakNext,
+                volume: ( masterVolume / 100 ) * ( speechVolume / 100 ) * ( volume > 0 ? volume / 100 : 1 ),
+                rate: ( rate ?? 1 ) * ( baseSpeakingRate ?? 1 ),
+            } );
+            if ( afterSpeech ) {
+                ipcRenderer.once( 'tts:piper:done', () => afterSpeech() );
+            }
+            return;
+        }
+
+        if ( voiceIndex > -1 ) {
+
+            let utter = new SpeechSynthesisUtterance();
+            utter.text = text;
+            utter.voice = voiceOptions[ voiceIndex ];
+            utter.volume = ( masterVolume / 100 ) * ( speechVolume / 100 ) * ( volume > 0 ? volume / 100 : 1 );
+            utter.rate = ( rate ?? 1 ) * ( baseSpeakingRate ?? 1 );
         
         utter.onend = function ( event ) {
             let i = utterances.indexOf( this );
@@ -3999,7 +4020,8 @@ function speakPhrase( phrase, interrupt, speakNext, conditionResults, simulating
             !speechSynthesis.speaking && speechSynthesis.speak( utterances[ 0 ] );
     
         }
-        
+
+        }
     } else if ( !simulating ) {
         nagException( { label: 'Speech Synthesis', message: phrase == null ? 'No phrase to speak' : 'No voice selected.', payload: { phrase: phrase, interrupt: interrupt, speakNext: speakNext, conditionResults: conditionResults, simulating: simulating, parseResult: parseResult, timerDuration: timerDuration, deltaTime: deltaTime, volume: volume, rate: rate } } );
 

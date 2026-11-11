@@ -35,6 +35,7 @@ import TriggerDatabaseStore from "./src/electron/data/trigger-database.js";
 import OverlayDatabaseStore from "./src/electron/data/overlay-database.js";
 import ForwardRef from "./src/electron/forward-ref.js";
 import WindowManager from "./src/electron/window-manager.js";
+import PiperTts from "./src/electron/utilities/piper-tts.js";
 import CharacterDatabaseStore from "./src/electron/data/character-database.js";
 import LogBootstrapper from "./src/electron/log-bootstrap.js";
 import GameResources from "./src/electron/data/game-resources.js";
@@ -117,7 +118,7 @@ app.isDev = () => enableDevMode === true && process.defaultApp === true;
  * @returns Returns the new application tray menu.
  */
 function createTray() {
-    let appTrayMenu = new Tray( path.join( __dirname, "Nag.ico" ) );
+    let appTrayMenu = new Tray( path.join( __dirname, process.platform === 'win32' ? "Nag.ico" : "Nag.png" ) );
     const contextMenu = Menu.buildFromTemplate( [
         {
             label: 'Show', click: function () {
@@ -193,11 +194,17 @@ function createWindow() {
 
     // If the main window has any part that is not on any screen, then we need to reset the bounds.
     const displays = screen.getAllDisplays();
-    let isWindowOutOfBounds = false;
+    let isWindowOutOfBounds = true;
     displays.forEach( display => {
-        if ( !isWindowOutOfBounds ) {
-            let out = nagBounds.x + nagBounds.width < display.bounds.x || nagBounds.x > display.bounds.x + display.bounds.width || nagBounds.y + nagBounds.height < display.bounds.y || nagBounds.y > display.bounds.y + display.bounds.height;
-            isWindowOutOfBounds = out;
+        if ( isWindowOutOfBounds ) {
+            // The window is on this display if it fits entirely within its bounds.
+            let onDisplay = nagBounds.x >= display.bounds.x
+                && nagBounds.x + nagBounds.width <= display.bounds.x + display.bounds.width
+                && nagBounds.y >= display.bounds.y
+                && nagBounds.y + nagBounds.height <= display.bounds.y + display.bounds.height;
+            if ( onDisplay ) {
+                isWindowOutOfBounds = false;
+            }
         }
     } );
 
@@ -407,10 +414,11 @@ const bootstrapApp = () => {
     
                 } else {
     
-                    if ( filePath.match( /^\/(css|img|js)/ ) ) {
+                    if ( filePath.match( /^\/(css|img|js|assets|fonts)\// ) ) {
                         filePath = path.join( app.getAppPath(), 'dist', filePath.slice( 1 ) );
-                    } else if ( filePath.match( /^\/[^/\\]+?\.(js|css|png|jpeg|jpg|ico|svg)$/ ) ) {
-                        // case of "vue-cli-service build --mode development"
+                    } else if ( filePath.match( /^\/.*\.(js|css|png|jpeg|jpg|ico|svg|woff|woff2|ttf|webp)$/ ) ) {
+                        // Any absolute asset request (e.g. /assets/images/foo.png) resolves to
+                        // dist for file:// pages whose <base href="/"> points at filesystem root.
                         filePath = path.join( app.getAppPath(), 'dist', filePath.slice( 1 ) );
                     }
     
@@ -587,6 +595,14 @@ ipcMain.on( 'app:log:info', ( event, data ) => {
     log.info( data );
 } );
 
+if ( process.platform === 'linux' ) {
+    ipcMain.on( 'tts:piper:speak', ( event, data ) => {
+        PiperTts.configure( userPreferences.piperDirectory, userPreferences.piperModel );
+        PiperTts.speak( data.text, data.interrupt, data.speakNext, data.volume, data.rate, event.sender );
+    } );
+    ipcMain.on( 'tts:piper:cancel', () => PiperTts.cancel() );
+}
+
 var quitCalled = false;
 ipcMain.on( 'app:quit', async ( event, forceQuit ) => {
     if ( forceQuit === true || !logBootstrap.isBackupProcessing ) {
@@ -683,6 +699,8 @@ function sendTick( delay ) {
         speechVolume: userPreferences.speechVolume,
         audioVolume: userPreferences.audioVolume,
         baseSpeakingRate: userPreferences.baseSpeakingRate,
+        piperDirectory: userPreferences.piperDirectory,
+        piperModel: userPreferences.piperModel,
         triggers: _triggers,
         triggerChanges: _tickTriggers !== _triggers.length,
         overlays: overlayDatabase.getAll(),

@@ -2236,6 +2236,38 @@ export class IpcService {
         return obs;
     }
 
+    public getPiperModels(): Observable<string[]> {
+        let obs: Observable<string[]> = new Observable<string[]>( ( observer: Observer<string[]> ) => {
+
+            window.api.ipc.invoke<string[]>( 'tts:piper:list-models' )
+                .then( models => {
+                    this.ngZone.run( () => {
+                        observer.next( models );
+                        observer.complete();
+                    } );
+                } );
+
+        } );
+
+        return obs;
+    }
+
+    public selectPiperFolder(): Observable<string> {
+        let obs: Observable<string> = new Observable<string>( ( observer: Observer<string> ) => {
+
+            window.api.ipc.invoke<string>( 'tts:piper:select-folder' )
+                .then( directory => {
+                    this.ngZone.run( () => {
+                        observer.next( directory );
+                        observer.complete();
+                    } );
+                } );
+
+        } );
+
+        return obs;
+    }
+
     public scrapeEqSpellResourceSpell( url: string ): Observable<ScrapedSpell> {
         let obs: Observable<ScrapedSpell> = new Observable<ScrapedSpell>( ( observer: Observer<ScrapedSpell> ) => {
 

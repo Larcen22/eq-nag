@@ -13,6 +13,7 @@ const channelPrefixes = [
     'dkp',
     'log',
     'voice',
+    'tts',
     'clipboard',
     'trigger',
     'window',

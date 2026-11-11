@@ -62,6 +62,10 @@ export class SettingsComponent implements OnInit {
     public baseSpeakingRate: number = 1;
     public utter: SpeechSynthesisUtterance | undefined = undefined;
     public updatedSettings: string[] = [];
+    public isLinux: boolean = navigator.platform.toLowerCase().includes('linux');
+    public piperDirectory: string = '';
+    public piperModel: string = '';
+    public piperModels: string[] = [];
 
     public get timerOverlays(): OverlayWindowModel[] {
         return this.overlays?.filter( m => m.overlayType === 'Timer' );
@@ -82,6 +86,7 @@ export class SettingsComponent implements OnInit {
         private readonly settingsService: SettingsService,
         private readonly snackBar: MatSnackBar,
         private readonly setupService: SetupService,
+        private readonly cdr: ChangeDetectorRef,
     ) {
         speechSynthesis.onvoiceschanged = () => {
             this.voiceOptions = speechSynthesis.getVoices();
@@ -99,6 +104,8 @@ export class SettingsComponent implements OnInit {
             this.baseSpeakingRate = data.baseSpeakingRate;
             this.voiceIndex = data.voiceIndex;
             this.overlays = data.overlays;
+            this.piperDirectory = data.piperDirectory;
+            this.piperModel = data.piperModel;
             
             this.phoneticTransforms = [];
             if ( data.phoneticTransforms ) {
@@ -164,6 +171,7 @@ export class SettingsComponent implements OnInit {
         this.ipcService.getDetrimentalOverlayId().subscribe( id => this.detrimentalOverlayId = id );
         this.ipcService.getBeneficialOverlayId().subscribe( id => this.beneficialOverlayId = id );
         this.ipcService.getAlertOverlayId().subscribe( id => this.alertOverlayId = id );
+        this.refreshPiperModels();
         this.ipcService.getEnableQuickShareImports().subscribe( enabled => this.enableQuickShareImports = enabled );
         this.ipcService.getMinimizeToTrayOnLoad().subscribe( enabled => this.minimizeToTrayOnLoad = enabled );
         this.ipcService.getDeathRecapPreferences().subscribe( recapPrefs => this.deathRecapPreferences = recapPrefs ?? new DeathRecapPreferences() );
@@ -540,6 +548,10 @@ export class SettingsComponent implements OnInit {
             this.utter = undefined;
         }
 
+        if ( navigator.platform.toLowerCase().includes( 'linux' ) ) {
+            window.api.ipc.send( 'tts:piper:speak', { text: phrase, interrupt: true, speakNext: false, volume: ( this.speechVolume / 100 ) * ( this.masterVolume / 100 ), rate: MathUtilities.clamp( rate, 0.5, 2 ) } );
+            return;
+        }
         this.utter = new SpeechSynthesisUtterance();
         this.utter.text = phrase;
         this.utter.voice = this.voiceOptions[ this.voiceIndex ];
@@ -564,6 +576,54 @@ export class SettingsComponent implements OnInit {
      */
     onChangeVoice(): void {
         this.ipcService.updateVoiceIndex( this.voiceIndex );
+    }
+
+    /**
+     * Loads the list of Piper voice models (.onnx files) from the configured folder.
+     */
+    refreshPiperModels(): void {
+        this.ipcService.getPiperModels().subscribe( models => {
+            this.piperModels = models ?? [];
+            if ( this.piperModels.length > 0 && !this.piperModel ) {
+                this.piperModel = this.piperModels[ 0 ];
+                this.updateSetting( this.settingsKeys.piperModel, this.piperModel, 500 );
+            }
+            if ( this.piperModel && this.piperModels.indexOf( this.piperModel ) === -1 ) {
+                this.piperModel = null;
+            }
+            this.cdr.detectChanges();
+        } );
+    }
+
+    /**
+     * Opens a folder picker to choose the Piper installation directory.
+     */
+    browsePiperFolder(): void {
+        this.ipcService.selectPiperFolder().subscribe( directory => {
+            if ( directory ) {
+                this.piperDirectory = directory;
+                this.updateSetting( this.settingsKeys.piperDirectory, directory, 500 );
+                this.refreshPiperModels();
+            }
+        } );
+    }
+
+    /**
+     * Stores the Piper installation directory and reloads available models.
+     */
+    onChangePiperFolder(): void {
+        this.updateSetting( this.settingsKeys.piperDirectory, this.piperDirectory, 500 );
+        this.refreshPiperModels();
+    }
+
+    /**
+     * Stores the selected Piper voice model.
+     */
+    onChangePiperModel( model?: string ): void {
+        if ( model !== undefined ) {
+            this.piperModel = model;
+        }
+        this.updateSetting( this.settingsKeys.piperModel, this.piperModel, 500 );
     }
 
 

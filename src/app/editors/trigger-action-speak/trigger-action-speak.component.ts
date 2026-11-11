@@ -33,6 +33,10 @@ export class TriggerActionSpeakComponent implements OnInit {
      * @param phrase The phrase to speak.
      */
     speakPhrase( phrase: string, rate: number ): void {
+        if ( navigator.platform.toLowerCase().includes( 'linux' ) ) {
+            window.api.ipc.send( 'tts:piper:speak', { text: phrase.replace( /\$/gi, '' ).replace( /\{/gi, '' ).replace( /\}/gi, '' ), interrupt: true, speakNext: false, volume: 1, rate: rate ?? 1 } );
+            return;
+        }
         var utter = new SpeechSynthesisUtterance();
         utter.text = phrase.replace( /\$/gi, '' ).replace( /\{/gi, '' ).replace( /\}/gi, '' );
         utter.voice = this.voiceOptions[ this.voiceIndex ];

@@ -161,7 +161,19 @@ function getRecordKeys( record ) {
  * @returns {import("electron").Rectangle}
  */
 function calculateRendererBounds() {
-        
+
+    // On Linux (XWayland), a window cannot span multiple displays, so the render
+    // surface is sized to the primary display instead of the combined screen.
+    if ( process.platform === 'linux' ) {
+        const primary = screen.getPrimaryDisplay();
+        return {
+            x: Math.floor( primary.bounds.x ),
+            y: Math.floor( primary.bounds.y ) - 50,
+            width: Math.floor( primary.bounds.width ),
+            height: Math.floor( primary.bounds.height ) + 50,
+        };
+    }
+
     let displays = screen.getAllDisplays();
     let left = 0, right = 0;
     let top = 0, bottom = 0;

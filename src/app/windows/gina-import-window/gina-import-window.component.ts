@@ -323,6 +323,10 @@ export class GinaImportWindowComponent implements OnInit {
     }
 
     public speakPhrase( phrase: string ): void {
+        if ( navigator.platform.toLowerCase().includes( 'linux' ) ) {
+            window.api.ipc.send( 'tts:piper:speak', { text: phrase, interrupt: true, speakNext: false, volume: 1, rate: 1 } );
+            return;
+        }
         var utter = new SpeechSynthesisUtterance();
         utter.text = phrase;
         utter.voice = this.voiceOptions[ this.voiceIndex ];
