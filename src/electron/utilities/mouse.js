@@ -2,11 +2,12 @@ const { getCurrentWindow, screen } = require( '@electron/remote' );
 const { mouseZIndex } = require( './constants' );
 
 var mouseEnabled = false;
-var dynamicMouseIntervalId = null;
+var trackingDynamicMouse = false;
 var origin = { x: 0, y: 0 };
 const _domRefreshMs = 5000;
-const _intervalMs = 33;
-var _intervalCount = 0;
+var _lastDomRefresh = 0;
+/** @type {{x: number, y: number} | null} The last cursor position sent by the main process. */
+var _lastCursor = null;
 /** @type {NodeListOf<Element> | undefined} */
 var mouseEnabledDoms = undefined;
 
@@ -25,8 +26,8 @@ function setIgnoreMouseEvents() {
     if ( mouseEnabled ) {
         mouseEnabled = false;
         getCurrentWindow().setIgnoreMouseEvents( true, { forward: false } );
-        if ( dynamicMouseIntervalId == null ) {
-            dynamicMouseIntervalId = window.setInterval( trackDynamicMouse, 33 );
+        if ( !trackingDynamicMouse ) {
+            trackingDynamicMouse = true;
         }
     }
 }
@@ -50,8 +51,7 @@ function setHandleMouseEvents( keepEnabled ) {
         mouseEnabled = true;
         getCurrentWindow().setIgnoreMouseEvents( false );
         if ( keepEnabled ) {
-            window.clearInterval( dynamicMouseIntervalId );
-            dynamicMouseIntervalId = null;
+            trackingDynamicMouse = false;
         }
     }
 }
@@ -88,9 +88,18 @@ function getMouseUpdate() {
  * Dynamically tracks the mouse, and enables/disables mouse events based on the mouse's position.
  */
 function trackDynamicMouse() {
-    mouseEnabledDoms = mouseEnabledDoms ?? document.querySelectorAll( '.dynamic-mouse' );
+    if ( _lastCursor == null ) {
+        return;
+    }
+    if ( Date.now() - _lastDomRefresh > _domRefreshMs ) {
+        mouseEnabledDoms = undefined;
+    }
+    if ( mouseEnabledDoms == null ) {
+        mouseEnabledDoms = document.querySelectorAll( '.dynamic-mouse' );
+        _lastDomRefresh = Date.now();
+    }
     mouseEnabledDoms.forEach( dom => dom.style.zIndex = dom.classList.contains('overlay-container') ? dom.style.zIndex : undefined );
-    let mouseCoords = getMouseUpdate();
+    let mouseCoords = _lastCursor;
 
     // If the mouse is over a dynamic-mouse element, then we want to set the mouse events to be handled.
     let mouseEnabled = false;
@@ -114,13 +123,16 @@ function trackDynamicMouse() {
     if ( mouseEnabled === false ) {
         setIgnoreMouseEvents();
     }
-
-    _intervalCount++;
-    if ( _intervalCount > (_domRefreshMs / _intervalMs) ) {
-        mouseEnabledDoms = undefined;
-        _intervalCount = 0;
-    }
 }
+
+// The main process sends the cursor position when it moves (and every half
+// second regardless), so the check only runs when there's something to check.
+ipcRenderer.on( 'renderer:cursor', ( event, cursor ) => {
+    _lastCursor = cursor;
+    if ( trackingDynamicMouse ) {
+        trackDynamicMouse();
+    }
+} );
 
 
 
@@ -133,7 +145,6 @@ function trackDynamicMouse() {
 
 const MouseUtilities = {
     mouseEnabled: mouseEnabled,
-    dynamicMouseIntervalId: dynamicMouseIntervalId,
     /**
      * Enables dynamic mouse tracking.
      * @param {{x: number, y: number}} screenOrigin The screen coordinates of the origin of the window.
@@ -141,15 +152,14 @@ const MouseUtilities = {
     trackDynamicMouse: ( screenOrigin ) => {
         origin = screenOrigin;
         mouseEnabledDoms = undefined;
-        _intervalCount = 0;
-        dynamicMouseIntervalId = window.setInterval( trackDynamicMouse, 33 );
+        trackingDynamicMouse = true;
+        trackDynamicMouse();
     },
     /**
      * Disables dynamic mouse tracking.
      */
     stopTrackingDynamicMouse: () => {
-        window.clearInterval( dynamicMouseIntervalId );
-        dynamicMouseIntervalId = null;
+        trackingDynamicMouse = false;
     },
     getMouseUpdate: getMouseUpdate,
     setHandleMouseEvents: setHandleMouseEvents,
@@ -159,7 +169,6 @@ const MouseUtilities = {
      */
     refreshDom: () => {
         mouseEnabledDoms = undefined;
-        _intervalCount = 0;
     }
 };
 
