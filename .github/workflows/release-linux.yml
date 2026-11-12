@@ -64,18 +64,15 @@ jobs:
         shell: bash
         run: npx ng build --configuration=production
 
-      - name: Build Windows installers
+      - name: Build Windows portable exe
         shell: bash
-        run: npx electron-builder build --win nsis portable --publish never
+        run: npx electron-builder build --win portable --publish never
 
       - name: Upload Windows artifacts
         uses: actions/upload-artifact@v4
         with:
           name: windows
-          path: |
-            electron/output/EQ-Nag-Setup-${{ env.VERSION }}.exe
-            electron/output/EQ-Nag-Setup-${{ env.VERSION }}.exe.blockmap
-            electron/output/eq_nag_portable.exe
+          path: electron/output/eq_nag_portable.exe
           if-no-files-found: error
 
   linux:

@@ -130,6 +130,7 @@
         "AppImage",
         "deb"
       ],
+      "artifactName": "EQ-Nag-${version}.AppImage",
       "icon": "Nag-512.png"
     },
     "portable": {
