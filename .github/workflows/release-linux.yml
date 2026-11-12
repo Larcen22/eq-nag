@@ -147,6 +147,9 @@ jobs:
     needs: [windows, linux]
     runs-on: ubuntu-latest
     steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
       - name: Resolve version
         shell: bash
         run: |
