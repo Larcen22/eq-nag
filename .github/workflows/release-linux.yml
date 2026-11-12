@@ -168,14 +168,16 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         shell: bash
         run: |
+          # The tag already exists (it triggered this workflow), so gh release
+          # create would refuse; create the release via the REST API instead.
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets."
-            gh release upload "$TAG" \
-              artifacts/windows/* \
-              artifacts/linux/* \
-              --clobber
           else
-            gh release create "$TAG" --target "$GITHUB_SHA" --generate-notes \
-              artifacts/windows/* \
-              artifacts/linux/*
+            gh api repos "$GITHUB_REPOSITORY"/releases \
+              -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" -f generate_release_notes=true
           fi
+
+          gh release upload "$TAG" \
+            artifacts/windows/* \
+            artifacts/linux/* \
+            --clobber
