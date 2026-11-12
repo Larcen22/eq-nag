@@ -1,0 +1,181 @@
+name: Release (Linux + Windows)
+
+# Builds both the Windows installer/portable and the Linux AppImage and
+# publishes them to a GitHub Release.
+#
+# - Pushing a tag like v0.2.27 builds and publishes that version automatically.
+# - Running it manually (workflow_dispatch) builds the version in package.json
+#   and creates the matching release/tag.
+#
+# This is independent of the Windows-only Pre-release/Release workflows, which
+# use .github/scripts/nag-release.py and their own version scheme.
+
+on:
+  push:
+    tags: 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write   # GITHUB_TOKEN creates the release and uploads assets
+
+concurrency:
+  group: nag-linux-release
+
+jobs:
+  windows:
+    runs-on: windows-2022   # node-gyp cannot use the VS on windows-latest yet
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 18
+          cache: npm
+
+      - name: Install dependencies
+        shell: bash
+        run: npm ci
+
+      # extraResources references .env, intentionally untracked/empty.
+      - name: Ensure .env exists
+        shell: bash
+        run: touch .env
+
+      - name: Set the version
+        shell: bash
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Set production config
+        shell: bash
+        run: npm run set-production-env
+
+      - name: Build Angular (production)
+        shell: bash
+        run: npx ng build --configuration=production
+
+      - name: Build Windows installers
+        shell: bash
+        run: npx electron-builder build --win nsis portable --publish never
+
+      - name: Upload Windows artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows
+          path: |
+            electron/output/EQ-Nag-Setup-${{ env.VERSION }}.exe
+            electron/output/EQ-Nag-Setup-${{ env.VERSION }}.exe.blockmap
+            electron/output/eq_nag_portable.exe
+          if-no-files-found: error
+
+  linux:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v5
+
+      - name: Resolve version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+          fi
+
+      - name: Setup Node
+        uses: actions/setup-node@v5
+        with:
+          node-version: 18
+          cache: npm
+
+      # --ignore-scripts skips native build scripts (active-win/electron-winstaller
+      # only build on Windows/macOS).
+      - name: Install dependencies
+        shell: bash
+        run: npm ci --ignore-scripts
+
+      # active-win has no Linux-buildable native addon; stub it so the Linux
+      # bundle loads (active-window detection is Windows/macOS only).
+      - name: Stub active-win for Linux
+        shell: bash
+        run: |
+          mkdir -p node_modules/active-win
+          cat > node_modules/active-win/index.js <<'EOF'
+          module.exports = async () => undefined;
+          module.exports.default = module.exports;
+          EOF
+
+      - name: Ensure .env exists
+        shell: bash
+        run: touch .env
+
+      - name: Set the version
+        shell: bash
+        run: npm version "$VERSION" --no-git-tag-version --allow-same-version
+
+      - name: Set production config
+        shell: bash
+        run: npm run set-production-env
+
+      - name: Build Angular (production)
+        shell: bash
+        run: npx ng build --configuration=production
+
+      - name: Build Linux AppImage
+        shell: bash
+        run: npx electron-builder build --linux --publish never
+
+      - name: Upload Linux artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux
+          path: electron/output/*.AppImage
+          if-no-files-found: error
+
+  publish:
+    needs: [windows, linux]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve version
+        shell: bash
+        run: |
+          if [[ "$GITHUB_REF" == refs/tags/v* ]]; then
+            echo "TAG=${GITHUB_REF#refs/tags/}" >> "$GITHUB_ENV"
+            echo "VERSION=${GITHUB_REF#refs/tags/v}" >> "$GITHUB_ENV"
+          else
+            echo "VERSION=$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+            echo "TAG=v$(node -p "require('./package.json').version")" >> "$GITHUB_ENV"
+          fi
+
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Create the GitHub release and upload binaries
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists; uploading assets."
+            gh release upload "$TAG" \
+              artifacts/windows/* \
+              artifacts/linux/* \
+              --clobber
+          else
+            gh release create "$TAG" --target "$GITHUB_SHA" --generate-notes \
+              artifacts/windows/* \
+              artifacts/linux/*
+          fi
