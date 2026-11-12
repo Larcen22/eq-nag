@@ -9,8 +9,9 @@ const path = require( 'path' );
  * mirroring the speechSynthesis queue semantics (interrupt / speakNext /
  * queued) used on Windows.
  *
- * Playback is platform-specific: Linux uses paplay; Windows plays the
- * generated WAV with PowerShell's System.Media.SoundPlayer (no new deps).
+ * Playback is platform-specific: Linux uses the first available of paplay,
+ * pw-play, aplay or ffplay; Windows plays the generated WAV with PowerShell's
+ * System.Media.SoundPlayer (no new deps).
  * The Piper binary is `piper` on Linux and `piper.exe` on Windows.
  */
 
@@ -21,6 +22,44 @@ let piperModelFile = piperModelEnv;
 const sampleRate = 22050;
 const isWindows = process.platform === 'win32';
 const piperBinaryName = isWindows ? 'piper.exe' : 'piper';
+
+// Linux audio players to try, in preference order. A system may ship none of
+// them, or only PipeWire's pw-play, so the first resolvable one is used.
+const linuxPlayers = [ 'paplay', 'pw-play', 'aplay', 'ffplay' ];
+
+function resolveAudioPlayer() {
+    if ( isWindows ) {
+        return 'powershell.exe';
+    }
+    const separators = process.env.PATH_SEPARATOR ?? ':';
+    const folders = ( process.env.PATH ?? '' ).split( separators );
+    for ( let name of linuxPlayers ) {
+        for ( let folder of folders ) {
+            try {
+                let candidate = path.join( folder, name );
+                let stats = fs.statSync( candidate );
+                if ( stats.isFile() && ( stats.mode & 0o111 ) ) {
+                    return candidate;
+                }
+            } catch {}
+        }
+    }
+    return null;
+}
+
+function audioPlayerArgs( wavPath ) {
+    if ( isWindows ) {
+        return [
+            '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
+            `(New-Object System.Media.SoundPlayer "${ wavPath }").PlaySync()`,
+        ];
+    }
+    // ffplay needs explicit playback flags; the aplay/paplay family takes a bare file.
+    if ( ( path.basename( audioPlayerPath ?? '' ) ) === 'ffplay' ) {
+        return [ '-nodisp', '-autoexit', '-loglevel', 'quiet', wavPath ];
+    }
+    return [ wavPath ];
+}
 
 /**
  * Sets the Piper installation folder and voice model from user preferences.
@@ -88,14 +127,23 @@ function resolvePaths() {
         }
     }
 
+    // Piper needs espeak-ng-data beside the binary on Windows; without it the
+    // binary runs but emits nothing, which would look configured-but-broken.
+    if ( isWindows && !fs.existsSync( path.join( path.dirname( bin ), 'espeak-ng-data' ) ) ) {
+        return null;
+    }
+
     return { bin, lib: path.dirname( bin ), model };
 
 }
 
-/** @type {{text: string, volume: number, lengthScale: number, sender?: any}[]} */
+/** @type {{text: string, volume: number, lengthScale: number, sender?: any, doneSent: boolean}[]} */
 let queue = [];
-/** @type {import('child_process').ChildProcess | null} */
-let currentPlayer = null;
+/** @type {{child: import('child_process').ChildProcess, item: any, cancelled: boolean} | null} */
+let runningSynthesis = null;
+/** @type {{child: import('child_process').ChildProcess, item: any, cancelled: boolean} | null} */
+let runningPlayback = null;
+let audioPlayerPath = undefined;
 let wavCounter = 0;
 
 /**
@@ -107,7 +155,8 @@ let wavCounter = 0;
  */
 function buildWav( pcm, volume ) {
 
-    const samples = new Int16Array( pcm.buffer, pcm.byteOffset, Math.floor( pcm.length / 2 ) );
+    const copy = Buffer.from( pcm );
+    const samples = new Int16Array( copy.buffer, 0, Math.floor( copy.length / 2 ) );
     if ( volume < 1 ) {
         for ( let i = 0; i < samples.length; i++ ) {
             samples[ i ] = Math.max( -32768, Math.min( 32767, Math.round( samples[ i ] * volume ) ) );
@@ -135,21 +184,49 @@ function buildWav( pcm, volume ) {
 }
 
 /**
+ * Notifies the requesting window that an utterance finished, was interrupted
+ * or failed. Always fires so listeners registered with ipcRenderer.once can't
+ * accumulate, and never fires twice for the same utterance.
+ * 
+ * @param {any} item The utterance being finished.
+ * @param {string} reason Why the utterance ended (logged).
+ */
+function finish( item, reason ) {
+    if ( item.doneSent ) {
+        return;
+    }
+    item.doneSent = true;
+    if ( item.sender ) {
+        try {
+            if ( !item.sender.isDestroyed() ) {
+                item.sender.send( 'tts:piper:done' );
+            }
+        } catch ( err ) {
+            console.error( `[PiperTts] done channel failed: ${ err.message }` );
+        }
+    }
+}
+
+/**
  * Synthesizes a phrase with Piper and plays it.
  * 
- * @param {{text: string, volume: number, lengthScale: number, sender?: any}} item The phrase to speak.
+ * @param {{text: string, volume: number, lengthScale: number, sender?: any, doneSent: boolean}} item The phrase to speak.
  */
 function synthesizeAndPlay( item ) {
 
     const paths = resolvePaths();
     if ( paths == null ) {
         console.error( '[PiperTts] Piper is not configured. Set the Piper folder in Settings > Sound. dir=', JSON.stringify( piperDirectory ) );
-        currentPlayer = null;
-        if ( item.sender ) {
-            item.sender.send( 'tts:piper:done' );
-        }
+        finish( item, 'not-configured' );
         next();
         return;
+    }
+
+    if ( audioPlayerPath === undefined ) {
+        audioPlayerPath = resolveAudioPlayer();
+        if ( audioPlayerPath === null ) {
+            console.error( '[PiperTts] No usable audio player found (tried paplay, pw-play, aplay, ffplay).' );
+        }
     }
 
     const piper = spawn( paths.bin, [
@@ -163,7 +240,13 @@ function synthesizeAndPlay( item ) {
         stdio: [ 'pipe', 'pipe', 'pipe' ],
     } );
 
-    piper.stderr.on( 'data', chunk => console.error( '[PiperTts] stderr:', chunk.toString().trim() ) );
+    runningSynthesis = { child: piper, item, cancelled: false };
+
+    // A spawn that never starts reports on stdin; swallow it so an unhandled
+    // stream error can't take down the main process.
+    piper.stdin.on( 'error', () => {} );
+
+    piper.stderr.on( 'data', chunk => console.error( `[PiperTts] stderr: ${ chunk.toString().trim() }` ) );
 
     piper.stdin.write( item.text + '\n' );
     piper.stdin.end();
@@ -172,58 +255,83 @@ function synthesizeAndPlay( item ) {
     piper.stdout.on( 'data', chunk => chunks.push( chunk ) );
 
     piper.on( 'error', err => {
-        console.error( `[PiperTts] Failed to start piper: ${err.message}` );
-        currentPlayer = null;
-        next();
+        console.error( `[PiperTts] Failed to start piper: ${ err.message }` );
+        if ( runningSynthesis?.item === item ) {
+            runningSynthesis = null;
+            finish( item, 'spawn-failed' );
+            next();
+        }
     } );
 
     piper.on( 'close', () => {
 
+        const cancelled = runningSynthesis?.cancelled ?? false;
+        if ( runningSynthesis ) {
+            runningSynthesis = null;
+        }
 
-        if ( chunks.length === 0 ) {
-            currentPlayer = null;
+        if ( cancelled ) {
+            finish( item, 'interrupted' );
             next();
             return;
         }
 
-        const wavPath = path.join( os.tmpdir(), `eqnag-tts-${process.pid}-${wavCounter++}.wav` );
-        fs.writeFileSync( wavPath, buildWav( Buffer.concat( chunks ), item.volume ) );
-
-        // Linux: paplay. Windows: PowerShell SoundPlayer, which plays the WAV
-        // synchronously and exits when playback finishes.
-        const player = isWindows
-            ? spawn( 'powershell.exe', [
-                '-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command',
-                `(New-Object System.Media.SoundPlayer "${wavPath}").PlaySync()`,
-            ], { stdio: [ 'ignore', 'ignore', 'pipe' ] } )
-            : spawn( 'paplay', [ wavPath ], { stdio: [ 'ignore', 'ignore', 'pipe' ] } );
-        currentPlayer = player;
-        player.stderr.on( 'data', chunk => console.error( `[PiperTts] player stderr: ${chunk.toString().trim()}` ) );
-
-        player.on( 'error', err => {
-            console.error( `[PiperTts] Failed to start player: ${err.message}` );
-            fs.unlinkSync( wavPath );
-            currentPlayer = null;
+        if ( chunks.length === 0 || audioPlayerPath === null ) {
+            finish( item, 'no-audio' );
             next();
-        } );
+            return;
+        }
 
-        player.on( 'close', () => {
-            try { fs.unlinkSync( wavPath ); } catch {}
-            if ( currentPlayer === player ) {
-                currentPlayer = null;
-                if ( item.sender ) {
-                    item.sender.send( 'tts:piper:done' );
-                }
+        const wavPath = path.join( os.tmpdir(), `eqnag-tts-${ process.pid }-${ wavCounter++ }.wav` );
+
+        const writeWav = ( err ) => {
+            if ( err ) {
+                console.error( `[PiperTts] WAV write failed: ${ err.message }` );
+                finish( item, 'write-failed' );
                 next();
+                return;
             }
-        } );
+
+            const player = isWindows
+                ? spawn( 'powershell.exe', audioPlayerArgs( wavPath ), { stdio: [ 'ignore', 'ignore', 'pipe' ] } )
+                : spawn( audioPlayerPath, audioPlayerArgs( wavPath ), { stdio: [ 'ignore', 'ignore', 'pipe' ] } );
+
+            runningPlayback = { child: player, item, cancelled: false };
+
+            player.on( 'error', err => {
+                console.error( `[PiperTts] Failed to start player: ${ err.message }` );
+                try { fs.unlinkSync( wavPath ); } catch {}
+                if ( runningPlayback?.child === player ) {
+                    runningPlayback = null;
+                }
+                finish( item, 'playback-failed' );
+                next();
+            } );
+
+            player.on( 'close', () => {
+                try { fs.unlinkSync( wavPath ); } catch {}
+                const wasCancelled = runningPlayback?.cancelled ?? false;
+                if ( runningPlayback?.child === player ) {
+                    runningPlayback = null;
+                }
+                finish( item, wasCancelled ? 'interrupted' : 'played' );
+                next();
+            } );
+
+        };
+
+        try {
+            fs.writeFile( wavPath, buildWav( Buffer.concat( chunks ), item.volume ), writeWav );
+        } catch ( err ) {
+            writeWav( err );
+        }
 
     } );
 
 }
 
 function next() {
-    if ( currentPlayer == null && queue.length > 0 ) {
+    if ( runningSynthesis == null && runningPlayback == null && queue.length > 0 ) {
         synthesizeAndPlay( queue.shift() );
     }
 }
@@ -245,19 +353,26 @@ function speak( text, interrupt, speakNext, volume, rate, sender ) {
         volume: Math.max( 0, Math.min( 1, volume ?? 1 ) ),
         lengthScale: Math.max( 0.5, Math.min( 2, 1 / ( rate || 1 ) ) ),
         sender,
+        doneSent: false,
     };
 
-    if ( interrupt && currentPlayer != null ) {
-        currentPlayer.kill();
-        currentPlayer = null;
+    if ( interrupt && ( runningSynthesis != null || runningPlayback != null ) ) {
+        if ( runningSynthesis != null ) {
+            runningSynthesis.cancelled = true;
+            runningSynthesis.child.kill();
+        }
+        if ( runningPlayback != null ) {
+            runningPlayback.cancelled = true;
+            runningPlayback.child.kill();
+        }
         // Drop the next queued phrase so already-queued speech is not re-spoken.
         queue.splice( 0, 1 );
         queue.unshift( item );
         next();
-    } else if ( speakNext && ( currentPlayer != null || queue.length > 0 ) ) {
+    } else if ( speakNext && ( runningSynthesis != null || runningPlayback != null || queue.length > 0 ) ) {
         if ( queue.length > 1 ) {
             queue = [ item, ...queue.slice( 1 ) ];
-        } else if ( currentPlayer != null ) {
+        } else if ( runningSynthesis != null || runningPlayback != null ) {
             queue.unshift( item );
         } else {
             queue.push( item );
@@ -268,8 +383,10 @@ function speak( text, interrupt, speakNext, volume, rate, sender ) {
         next();
     }
 
-    // Guard against runaway queues if paplay fails repeatedly.
     if ( queue.length > 30 ) {
+        for ( let dropped of queue.slice( 30 ) ) {
+            finish( dropped, 'queue-overflow' );
+        }
         queue = queue.slice( 0, 30 );
     }
 
@@ -279,9 +396,16 @@ function speak( text, interrupt, speakNext, volume, rate, sender ) {
  * Stops all speech and clears the queue.
  */
 function cancel() {
-    if ( currentPlayer != null ) {
-        currentPlayer.kill();
-        currentPlayer = null;
+    if ( runningSynthesis != null ) {
+        runningSynthesis.cancelled = true;
+        runningSynthesis.child.kill();
+    }
+    if ( runningPlayback != null ) {
+        runningPlayback.cancelled = true;
+        runningPlayback.child.kill();
+    }
+    for ( let dropped of queue ) {
+        finish( dropped, 'cancelled' );
     }
     queue = [];
 }

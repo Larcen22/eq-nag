@@ -204,6 +204,13 @@ const baseLog = fs.readFileSync( testLog );
 const seed = path.join( work, 'profile-seed' );
 await seedProfile( seed );
 
+// Process sampling uses PowerShell's Win32_Process tables, so a non-Windows
+// run would silently measure nothing; stop with a clear message instead.
+if ( process.platform !== 'win32' ) {
+    console.error( 'perf-test only runs on Windows (CPU sampling uses Get-CimInstance Win32_Process).' );
+    process.exit( 1 );
+}
+
 const results = [];
 for ( const [ index, app ] of apps.entries() ) {
     const label = app === 'dev' ? 'dev (this repository)' : path.basename( app );

@@ -1,7 +1,7 @@
 name: Release (Linux + Windows)
 
-# Builds both the Windows installer/portable and the Linux AppImage and
-# publishes them to a GitHub Release.
+# Builds both the Windows portable exe and the Linux AppImage and publishes
+# them to a GitHub Release.
 #
 # - Pushing a tag like v0.2.27 builds and publishes that version automatically.
 # - Running it manually (workflow_dispatch) builds the version in package.json
@@ -12,7 +12,10 @@ name: Release (Linux + Windows)
 
 on:
   push:
-    tags: 'v*'
+    # Only semantic version tags, so an unrelated tag starting with "v"
+    # (void, verify, ...) cannot trigger a two-OS build that publishes a
+    # public release.
+    tags: 'v*.*.*'
   workflow_dispatch:
 
 permissions:
@@ -97,21 +100,12 @@ jobs:
           cache: npm
 
       # --ignore-scripts skips native build scripts (active-win/electron-winstaller
-      # only build on Windows/macOS).
+      # only build on Windows/macOS). The app never loads active-win on Linux
+      # (see src/electron/utilities/active-win-shim.js), so the unbuilt package
+      # is harmless here.
       - name: Install dependencies
         shell: bash
         run: npm ci --ignore-scripts
-
-      # active-win has no Linux-buildable native addon; stub it so the Linux
-      # bundle loads (active-window detection is Windows/macOS only).
-      - name: Stub active-win for Linux
-        shell: bash
-        run: |
-          mkdir -p node_modules/active-win
-          cat > node_modules/active-win/index.js <<'EOF'
-          module.exports = async () => undefined;
-          module.exports.default = module.exports;
-          EOF
 
       - name: Ensure .env exists
         shell: bash
@@ -162,6 +156,28 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+
+      # A missing asset here means one build broke while the other passed;
+      # publishing would ship an incomplete release, so fail instead.
+      - name: Verify both binaries are present
+        shell: bash
+        run: |
+          ls -l artifacts/windows artifacts/linux
+          [ -s artifacts/windows/eq_nag_portable.exe ] || { echo "Windows artifact missing"; exit 1; }
+          ls artifacts/linux/*.AppImage >/dev/null || { echo "Linux artifact missing"; exit 1; }
+
+      # An earlier run can leave a release with no assets (the upload step is
+      # independent of the create step); delete those before publishing so
+      # the release list stays clean.
+      - name: Prune empty releases
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          for id in $(gh api "repos/$GITHUB_REPOSITORY/releases" --paginate \
+            --jq '.[] | select(.assets | length == 0) | .id'); do
+            gh api -X DELETE "repos/$GITHUB_REPOSITORY/releases/releases/$id"
+          done
 
       - name: Create the GitHub release and upload binaries
         env:

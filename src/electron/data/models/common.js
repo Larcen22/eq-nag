@@ -1,4 +1,4 @@
-const activeWindow = require( 'active-win' );
+const activeWindow = require( '../../utilities/active-win-shim' );
 const StringUtilities = require( '../../utilities/string' );
 const { DpsMeterSettings } = require( './combat-parser' );
 

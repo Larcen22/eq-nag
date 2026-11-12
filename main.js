@@ -87,7 +87,7 @@ import * as VerifiedPlayersStore from "./src/electron/data/verified-players.js";
 import cronParser from "cron-parser";
 import { DateUtilities } from "./src/electron/utilities/dates.js";
 import CombatDatabase from "./src/electron/data/combat-database.js";
-import activeWindow from "active-win";
+import activeWindow from "./src/electron/utilities/active-win-shim.js";
 import { createHash as hasher } from "crypto";
 
 import { fileURLToPath } from 'url';
@@ -325,6 +325,15 @@ function createWindow() {
 };
 
 app.commandLine.appendSwitch( 'enable-speech-dispatcher' );
+
+// Multi-window placement (log overlays, drag/resize) needs the X11 backend;
+// under Wayland Chromium refuses to size windows to a specific display. The
+// env hint is set by the launcher on Linux desktops, but an AppImage or a bare
+// binary may not carry it, so pin the switch here unless the host already chose
+// one.
+if ( process.platform === 'linux' && !process.env.ELECTRON_OZONE_PLATFORM_HINT ) {
+    app.commandLine.appendSwitch( 'ozone-platform', 'x11' );
+}
 
 app.on( 'before-quit', async () => {
     trayMenu.destroy();
