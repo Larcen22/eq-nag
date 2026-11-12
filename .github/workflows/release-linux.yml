@@ -173,8 +173,8 @@ jobs:
           if gh release view "$TAG" >/dev/null 2>&1; then
             echo "Release $TAG already exists; uploading assets."
           else
-            gh api repos "$GITHUB_REPOSITORY"/releases \
-              -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" -f generate_release_notes=true
+            gh api "repos/$GITHUB_REPOSITORY/releases" \
+              -f tag_name="$TAG" -f target_commitish="$GITHUB_SHA" -F generate_release_notes=true
           fi
 
           gh release upload "$TAG" \
